@@ -284,6 +284,10 @@ const getLayoutStyles = (
   dd.aligned-center, div.aligned-center {
     text-align: center ${overrideLayout ? '!important' : ''};
   }
+  p.aligned-left, blockquote.aligned-left,
+  dd.aligned-left, div.aligned-left {
+    ${justify && overrideLayout ? 'text-align: justify !important;' : ''}
+  }
   p.aligned-right, blockquote.aligned-right,
   dd.aligned-right, div.aligned-right {
     text-align: right ${overrideLayout ? '!important' : ''};
@@ -386,7 +390,7 @@ const getLayoutStyles = (
   }
   img.has-text-siblings {
     height: 1em;
-    vertical-align: middle;
+    vertical-align: baseline;
   }
   :is(div) > img.has-text-siblings[style*="object-fit"] {
     display: block;
@@ -808,6 +812,8 @@ export const keepTextAlignment = (document: Document) => {
     const computedStyle = window.getComputedStyle(el);
     if (computedStyle.textAlign === 'center') {
       el.classList.add('aligned-center');
+    } else if (computedStyle.textAlign === 'left') {
+      el.classList.add('aligned-left');
     } else if (computedStyle.textAlign === 'right') {
       el.classList.add('aligned-right');
     } else if (computedStyle.textAlign === 'justify') {

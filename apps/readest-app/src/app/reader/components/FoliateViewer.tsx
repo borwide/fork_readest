@@ -132,7 +132,8 @@ const FoliateViewer: React.FC<{
           const bookData = getBookData(bookKey);
           if (viewSettings && detail.type === 'text/css')
             return transformStylesheet(data, width, height, viewSettings.vertical);
-          if (viewSettings && bookData && detail.type === 'application/xhtml+xml') {
+          const isHtml = detail.type === 'application/xhtml+xml' || detail.type === 'text/html';
+          if (viewSettings && bookData && isHtml) {
             const ctx: TransformContext = {
               bookKey,
               viewSettings,
@@ -141,6 +142,7 @@ const FoliateViewer: React.FC<{
               primaryLanguage: bookData.book?.primaryLanguage,
               userLocale: getLocale(),
               content: data,
+              sectionHref: detail.name,
               transformers: [
                 'style',
                 'punctuation',
@@ -149,9 +151,8 @@ const FoliateViewer: React.FC<{
                 'language',
                 'sanitizer',
                 'simplecc',
-                'replacement',
+                'proofread',
               ],
-              sectionHref: detail.name, // Pass section href for single-instance replacements
             };
             return Promise.resolve(transformContent(ctx));
           }
@@ -328,8 +329,8 @@ const FoliateViewer: React.FC<{
       });
       const viewWidth = appService?.isMobile ? screen.width : window.innerWidth;
       const viewHeight = appService?.isMobile ? screen.height : window.innerHeight;
-      const width = viewWidth - insets.left - insets.right;
-      const height = viewHeight - insets.top - insets.bottom;
+      const width = viewWidth;
+      const height = viewHeight;
       book.transformTarget?.addEventListener('data', getDocTransformHandler({ width, height }));
       view.renderer.setStyles?.(getStyles(viewSettings));
       applyTranslationStyle(viewSettings);
