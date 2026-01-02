@@ -10,6 +10,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { useAutoFocus } from '@/hooks/useAutoFocus';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useLibraryStore } from '@/store/libraryStore';
+import { useTransferStore } from '@/store/transferStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { navigateToLibrary, navigateToReader, showReaderWindow } from '@/utils/nav';
@@ -23,6 +24,7 @@ import ModalPortal from '@/components/ModalPortal';
 import BookshelfItem, { generateBookshelfItems } from './BookshelfItem';
 import SelectModeActions from './SelectModeActions';
 import GroupingModal from './GroupingModal';
+import TransferQueuePanel from './TransferQueuePanel';
 
 interface BookshelfProps {
   libraryBooks: Book[];
@@ -30,7 +32,10 @@ interface BookshelfProps {
   isSelectAll: boolean;
   isSelectNone: boolean;
   handleImportBooks: () => void;
-  handleBookDownload: (book: Book) => Promise<boolean>;
+  handleBookDownload: (
+    book: Book,
+    options?: { redownload?: boolean; queued?: boolean },
+  ) => Promise<boolean>;
   handleBookUpload: (book: Book, syncBooks?: boolean) => Promise<boolean>;
   handleBookDelete: (book: Book, syncBooks?: boolean) => Promise<boolean>;
   handleSetSelectMode: (selectMode: boolean) => void;
@@ -81,6 +86,8 @@ const Bookshelf: React.FC<BookshelfProps> = ({
   const { setCurrentBookshelf, setLibrary } = useLibraryStore();
   const { setSelectedBooks, getSelectedBooks, toggleSelectedBook } = useLibraryStore();
   const { getGroupName } = useLibraryStore();
+
+  const { isTransferQueueOpen } = useTransferStore();
 
   const uiLanguage = localStorage?.getItem('i18nextLng') || '';
 
@@ -374,6 +381,11 @@ const Bookshelf: React.FC<BookshelfProps> = ({
               handleSetSelectMode(false);
             }}
           />
+        </ModalPortal>
+      )}
+      {isTransferQueueOpen && (
+        <ModalPortal>
+          <TransferQueuePanel />
         </ModalPortal>
       )}
       {showDeleteAlert && (
