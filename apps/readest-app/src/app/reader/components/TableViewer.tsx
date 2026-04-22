@@ -1,9 +1,12 @@
 import clsx from 'clsx';
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useKeyDownActions } from '@/hooks/useKeyDownActions';
+import { Insets } from '@/types/misc';
 import ZoomControls from './ZoomControls';
 
 interface TableViewerProps {
+  gridInsets: Insets;
   html: string | null;
   isDarkMode: boolean;
   onClose: () => void;
@@ -13,7 +16,7 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
 const ZOOM_SPEED = 0.1;
 
-const TableViewer: React.FC<TableViewerProps> = ({ html, isDarkMode, onClose }) => {
+const TableViewer: React.FC<TableViewerProps> = ({ gridInsets, html, isDarkMode, onClose }) => {
   const _ = useTranslation();
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -24,6 +27,9 @@ const TableViewer: React.FC<TableViewerProps> = ({ html, isDarkMode, onClose }) 
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const zoomLabelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Escape (desktop) and Android Back key → close the viewer.
+  useKeyDownActions({ onCancel: onClose });
 
   const hideZoomLabelAfterDelay = () => {
     if (zoomLabelTimeoutRef.current) {
@@ -61,10 +67,7 @@ const TableViewer: React.FC<TableViewerProps> = ({ html, isDarkMode, onClose }) 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     e.stopPropagation();
 
-    if (e.key === 'Escape') {
-      onClose();
-      return;
-    }
+    // Escape is handled by useKeyDownActions (also covers Android Back key).
 
     const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
@@ -188,6 +191,7 @@ const TableViewer: React.FC<TableViewerProps> = ({ html, isDarkMode, onClose }) 
         }}
       />
       <ZoomControls
+        gridInsets={gridInsets}
         onClose={onClose}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}

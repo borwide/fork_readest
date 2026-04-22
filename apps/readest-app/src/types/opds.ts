@@ -23,6 +23,7 @@ export interface OPDSCatalog {
   icon?: string;
   username?: string;
   password?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export interface OPDSFeed {
@@ -50,6 +51,7 @@ export interface OPDSPublication {
     identifier?: string;
     subject?: OPDSSubject[];
     rights?: string;
+    content?: OPDSContent;
     [SYMBOL.CONTENT]?: OPDSContent;
   };
   links: OPDSLink[];
