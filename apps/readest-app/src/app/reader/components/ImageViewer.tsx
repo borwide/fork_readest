@@ -1,11 +1,13 @@
 import clsx from 'clsx';
 import React, { useState, useRef, useEffect } from 'react';
-import Image from 'next/image';
 import { IoChevronBack, IoChevronForward } from 'react-icons/io5';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useKeyDownActions } from '@/hooks/useKeyDownActions';
+import { Insets } from '@/types/misc';
 import ZoomControls from './ZoomControls';
 
 interface ImageViewerProps {
+  gridInsets: Insets;
   src: string | null;
   onClose: () => void;
   onPrevious?: () => void;
@@ -18,7 +20,13 @@ const ZOOM_SPEED = 0.1;
 const MOBILE_ZOOM_SPEED = 0.001;
 const ZOOM_BIAS = 1.05;
 
-const ImageViewer: React.FC<ImageViewerProps> = ({ src, onClose, onPrevious, onNext }) => {
+const ImageViewer: React.FC<ImageViewerProps> = ({
+  src,
+  onClose,
+  onPrevious,
+  onNext,
+  gridInsets,
+}) => {
   const _ = useTranslation();
   const [scale, setScale] = useState(1);
   const [zoomSpeed, setZoomSpeed] = useState(0.1);
@@ -31,6 +39,9 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ src, onClose, onPrevious, onN
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const zoomLabelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Escape (desktop) and Android Back key → close the viewer.
+  useKeyDownActions({ onCancel: onClose });
 
   const hideZoomLabelAfterDelay = () => {
     if (zoomLabelTimeoutRef.current) {
@@ -72,10 +83,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ src, onClose, onPrevious, onN
   const handleKeyDown = (e: React.KeyboardEvent) => {
     e.stopPropagation();
 
-    if (e.key === 'Escape') {
-      onClose();
-      return;
-    }
+    // Escape is handled by useKeyDownActions (also covers Android Back key).
 
     // Arrow key navigation
     if (e.key === 'ArrowLeft' && onPrevious) {
@@ -391,6 +399,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ src, onClose, onPrevious, onN
         }}
       />
       <ZoomControls
+        gridInsets={gridInsets}
         onClose={onClose}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
@@ -430,7 +439,8 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ src, onClose, onPrevious, onN
         className={clsx('relative flex h-full w-full items-center justify-center overflow-hidden')}
         onClick={handleContainerClick}
       >
-        <Image
+        <img
+          role='none'
           src={decodeURIComponent(src)}
           ref={imageRef}
           alt={_('Zoomed')}
