@@ -35,10 +35,14 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUICSS } from '@/hooks/useUICSS';
 import { useDemoBooks } from './hooks/useDemoBooks';
 import { useBooksSync } from './hooks/useBooksSync';
+import { useOPDSSubscriptions } from '@/hooks/useOPDSSubscriptions';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useTransferStore } from '@/store/transferStore';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
+import { useAppUrlIngress } from '@/hooks/useAppUrlIngress';
 import { useOpenWithBooks } from '@/hooks/useOpenWithBooks';
+import { useOpenAnnotationLink } from '@/hooks/useOpenAnnotationLink';
+import { useOpenShareLink } from '@/hooks/useOpenShareLink';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { SelectedFile, useFileSelector } from '@/hooks/useFileSelector';
 import { lockScreenOrientation, selectDirectory } from '@/utils/bridge';
@@ -158,16 +162,26 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   useTheme({ systemUIVisible: true, appThemeColor: 'base-200' });
   useUICSS();
 
+  useAppUrlIngress();
   useOpenWithBooks();
+  useOpenAnnotationLink();
+  useOpenShareLink();
   useTransferQueue(libraryLoaded);
 
   const { pullLibrary, pushLibrary } = useBooksSync();
+  const { checkOPDSSubscriptions } = useOPDSSubscriptions();
   const { isDragging } = useDragDropImport();
 
   usePullToRefresh(
     scrollRef,
-    pullLibrary.bind(null, false, true),
-    pullLibrary.bind(null, true, true),
+    async () => {
+      await pullLibrary(false, true);
+      checkOPDSSubscriptions(true);
+    },
+    async () => {
+      await pullLibrary(true, true);
+      checkOPDSSubscriptions(true);
+    },
   );
   useScreenWakeLock(settings.screenWakeLock);
 
@@ -319,12 +333,21 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleImportBookDirectory = useCallback(async (event: CustomEvent) => {
+    const dirPath: string | undefined = event.detail?.path;
+    if (!dirPath) return;
+    await handleImportBooksFromDirectory(dirPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     eventDispatcher.on('import-book-files', handleImportBookFiles);
+    eventDispatcher.on('import-book-directory', handleImportBookDirectory);
     return () => {
       eventDispatcher.off('import-book-files', handleImportBookFiles);
+      eventDispatcher.off('import-book-directory', handleImportBookDirectory);
     };
-  }, [handleImportBookFiles]);
+  }, [handleImportBookFiles, handleImportBookDirectory]);
 
   useEffect(() => {
     if (!libraryBooks.some((book) => !book.deletedAt)) {
@@ -788,19 +811,21 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     });
   };
 
-  const handleImportBooksFromDirectory = async () => {
+  const handleImportBooksFromDirectory = async (dirPath?: string) => {
     if (!appService || !isTauriAppPlatform()) return;
 
     setIsSelectMode(false);
     console.log('Importing books from directory...');
-    let importDirectory: string | undefined = '';
-    if (appService.isAndroidApp) {
-      if (!(await requestStoragePermission())) return;
-      const response = await selectDirectory();
-      importDirectory = response.path;
-    } else {
-      const selectedDir = await appService.selectDirectory?.('read');
-      importDirectory = selectedDir;
+    let importDirectory: string | undefined = dirPath;
+    if (!importDirectory) {
+      if (appService.isAndroidApp) {
+        if (!(await requestStoragePermission())) return;
+        const response = await selectDirectory();
+        importDirectory = response.path;
+      } else {
+        const selectedDir = await appService.selectDirectory?.('read');
+        importDirectory = selectedDir;
+      }
     }
     if (!importDirectory) {
       console.log('No directory selected');

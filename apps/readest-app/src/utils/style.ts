@@ -196,6 +196,10 @@ const getColorStyles = (
     table:has(> colgroup) {
       table-layout: fixed;
     }
+    td, th {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
     /* code */
     body.theme-dark code {
       ${isDarkMode ? `color: ${fg}cc;` : ''}
@@ -206,8 +210,8 @@ const getColorStyles = (
       ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
     }
     blockquote, table * {
-      ${isDarkMode && overrideColor ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
-      ${isDarkMode && overrideColor ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+      ${isDarkMode ? `background: color-mix(in srgb, ${bg} 80%, #000);` : ''}
+      ${isDarkMode ? `background-color: color-mix(in srgb, ${bg} 80%, #000);` : ''}
     }
     /* override inline hardcoded text color */
     font[color="#000000"], font[color="#000"], font[color="black"],
@@ -546,6 +550,34 @@ const getTranslationStyles = (showSource: boolean) => `
   }
 `;
 
+const getWarichuStyles = () => `
+  /* Warichu (割注/夹注) — double-line inline annotation */
+  .warichu-pending {
+    display: inline;
+    font-size: 0.5em;
+    line-height: 1.1;
+  }
+  .warichu-chunk {
+    display: inline-block;
+    line-height: 1.1;
+    font-size: 0.5em;
+    text-indent: 0;
+    vertical-align: middle !important;
+    width: 1lh !important;
+    text-align: center !important;
+  }
+  .warichu-chunk .warichu-line {
+    display: inline;
+  }
+  .warichu-open,
+  .warichu-close {
+    display: inline;
+    font-size: 0.5em;
+    vertical-align: middle;
+    line-height: 1.1;
+  }
+`;
+
 export interface ThemeCode {
   bg: string;
   fg: string;
@@ -641,8 +673,9 @@ export const getStyles = (viewSettings: ViewSettings, themeCode?: ThemeCode) => 
     viewSettings.isEink,
   );
   const translationStyles = getTranslationStyles(viewSettings.showTranslateSource!);
+  const warichuStyles = getWarichuStyles();
   const userStylesheet = viewSettings.userStylesheet!;
-  return `${pageLayoutStyles}\n${paragraphLayoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${userStylesheet}`;
+  return `${pageLayoutStyles}\n${paragraphLayoutStyles}\n${fontStyles}\n${colorStyles}\n${translationStyles}\n${warichuStyles}\n${userStylesheet}`;
 };
 
 export const applyTranslationStyle = (viewSettings: ViewSettings) => {
@@ -740,15 +773,15 @@ export const transformStylesheet = (css: string, vw: number, vh: number, vertica
       }
       if (directions.includes('left') && directions.includes('right')) {
         block = block
-          .replace(/}$/, ' width: calc(var(--available-width) * 1px) !important; }')
-          .replace(/}$/, ' min-width: calc(var(--available-width) * 1px) !important; }')
-          .replace(/}$/, ' max-width: calc(var(--available-width) * 1px) !important; }');
+          .replace(/}$/, ' width: calc(var(--full-width) * 1px) !important; }')
+          .replace(/}$/, ' min-width: calc(var(--full-width) * 1px) !important; }')
+          .replace(/}$/, ' max-width: calc(var(--full-width) * 1px) !important; }');
       }
       if (directions.includes('top') && directions.includes('bottom')) {
         block = block
-          .replace(/}$/, ' height: calc(var(--available-height) * 1px) !important; }')
-          .replace(/}$/, ' min-height: calc(var(--available-height) * 1px) !important; }')
-          .replace(/}$/, ' max-height: calc(var(--available-height) * 1px) !important; }');
+          .replace(/}$/, ' height: calc(var(--full-height) * 1px) !important; }')
+          .replace(/}$/, ' min-height: calc(var(--full-height) * 1px) !important; }')
+          .replace(/}$/, ' max-height: calc(var(--full-height) * 1px) !important; }');
       }
     }
     return selector + block;

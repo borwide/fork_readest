@@ -16,10 +16,14 @@ const PUNCTUATION_PAUSE_KEY_PREFIX = 'readest_rsvp_pause_';
 const POSITION_KEY_PREFIX = 'readest_rsvp_pos_';
 const SPLIT_HYPHENS_KEY = 'readest_rsvp_split_hyphens';
 
+// Section-only CFI (no '!') sorts before any word CFI in that section.
+const stripCfiPath = (cfi: string): string => cfi.replace(/!.*\)$/, ')');
+
 export class RSVPController extends EventTarget {
   private view: FoliateView;
   private bookId: string; // Book hash without session suffix, for persistent storage
   private currentCfi: string | null = null;
+  private primaryLanguage: string | undefined;
 
   private state: RsvpState = {
     active: false,
@@ -37,14 +41,23 @@ export class RSVPController extends EventTarget {
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private pendingStartWordIndex: number | null = null;
   private countdown: number | null = null;
+  private cachedWords: { docIndex: number; doc: Document; words: RsvpWord[] } | null = null;
 
-  constructor(view: FoliateView, bookKey: string) {
+  constructor(view: FoliateView, bookKey: string, primaryLanguage?: string) {
     super();
     this.view = view;
     // Extract book ID (hash) from bookKey format: "{hash}-{sessionId}"
     // Use only the hash for persistent position storage across sessions
     this.bookId = bookKey.split('-')[0] || bookKey;
+    this.primaryLanguage = primaryLanguage;
     this.loadSettings();
+  }
+
+  setPrimaryLanguage(lang: string | undefined): void {
+    if (this.primaryLanguage === lang) return;
+    this.primaryLanguage = lang;
+    // Language changes invalidate the segmentation result.
+    this.cachedWords = null;
   }
 
   private loadSettings(): void {
@@ -194,7 +207,7 @@ export class RSVPController extends EventTarget {
     const currentWord = this.state.words[this.state.currentIndex];
     if (!currentWord) return;
 
-    const cfi = currentWord.cfi || this.currentCfi;
+    const cfi = this.getCfiForWord(currentWord) || this.currentCfi;
     if (!cfi) return;
 
     const position: RsvpPosition = {
@@ -208,11 +221,27 @@ export class RSVPController extends EventTarget {
     localStorage.removeItem(`${POSITION_KEY_PREFIX}${this.bookId}`);
   }
 
-  seedPosition(position: RsvpPosition): void {
-    const storageKey = `${POSITION_KEY_PREFIX}${this.bookId}`;
-    if (!localStorage.getItem(storageKey)) {
-      localStorage.setItem(storageKey, JSON.stringify(position));
+  seedPosition(position: RsvpPosition, currentLocationCfi?: string | null): void {
+    const key = `${POSITION_KEY_PREFIX}${this.bookId}`;
+    let final = position;
+
+    // Cross-chapter mismatch means stale sync (exit pins them together);
+    // fall back to the start of the location's chapter.
+    if (
+      currentLocationCfi &&
+      position.cfi &&
+      !this.isSameSection(position.cfi, currentLocationCfi)
+    ) {
+      console.warn('[RSVP] rsvpPosition chapter mismatch; resetting to start of synced chapter', {
+        rsvpCfi: position.cfi,
+        locationCfi: currentLocationCfi,
+      });
+      final = { cfi: stripCfiPath(currentLocationCfi), wordText: '' };
     }
+
+    const serialized = JSON.stringify(final);
+    if (localStorage.getItem(key) === serialized) return;
+    localStorage.setItem(key, serialized);
   }
 
   getStoredPosition(): RsvpPosition | null {
@@ -235,23 +264,85 @@ export class RSVPController extends EventTarget {
   }
 
   private findWordIndexByCfi(words: RsvpWord[], targetCfi: string): number {
-    // First try exact CFI match
-    for (let i = 0; i < words.length; i++) {
-      if (words[i]?.cfi === targetCfi) return i;
-    }
-
-    // Find the first word at or after the target position using CFI compare
     const targetSpineIndex = this.getSpineIndex(targetCfi);
     if (targetSpineIndex < 0) return -1;
 
+    // Resolve target CFI to a Range in the section's document so we can
+    // find the matching word by range comparison (O(1) per check) rather
+    // than by per-word CFI generation, which dominates extract cost on
+    // long sections.
+    const targetRange = this.resolveCfiToRange(targetCfi, targetSpineIndex);
+    if (targetRange) {
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (!word?.range) continue;
+        if (word.docIndex !== targetSpineIndex) continue;
+        try {
+          if (word.range.compareBoundaryPoints(Range.START_TO_START, targetRange) >= 0) {
+            return i;
+          }
+        } catch {
+          // Cross-document range compare throws; skip.
+        }
+      }
+    }
+
+    // Fallback: per-word CFI compare (slow path, used when the CFI cannot
+    // be resolved to a range — e.g. fixed-layout pages).
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
-      if (!word?.cfi) continue;
-      if (this.getSpineIndex(word.cfi) !== targetSpineIndex) continue;
-      if (compareCFI(word.cfi, targetCfi) >= 0) return i;
+      if (!word?.range || word.docIndex === undefined) continue;
+      let wordCfi: string | undefined;
+      try {
+        wordCfi = this.view.getCFI(word.docIndex, word.range);
+      } catch {
+        continue;
+      }
+      if (!wordCfi) continue;
+      if (this.getSpineIndex(wordCfi) !== targetSpineIndex) continue;
+      if (compareCFI(wordCfi, targetCfi) >= 0) return i;
     }
 
     return -1;
+  }
+
+  private resolveCfiToRange(cfi: string, spineIndex: number): Range | null {
+    try {
+      const renderer = this.view.renderer;
+      const contents = renderer?.getContents?.();
+      if (!contents) return null;
+      const target = (contents as Array<{ doc: Document; index: number }>).find(
+        (c) => c.index === spineIndex,
+      );
+      if (!target) return null;
+      const resolved = (
+        this.view as unknown as {
+          resolveCFI?: (cfi: string) => { index: number; anchor?: (doc: Document) => unknown };
+        }
+      ).resolveCFI?.(cfi);
+      if (!resolved || resolved.index !== spineIndex || typeof resolved.anchor !== 'function') {
+        return null;
+      }
+      const anchor = resolved.anchor(target.doc);
+      if (anchor instanceof Range) return anchor;
+      if (anchor && anchor instanceof target.doc.defaultView!.Node) {
+        const range = target.doc.createRange();
+        range.selectNode(anchor as Node);
+        return range;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private getCfiForWord(word: RsvpWord | undefined): string | undefined {
+    if (!word?.range || word.docIndex === undefined) return undefined;
+    try {
+      return this.view.getCFI(word.docIndex, word.range);
+    } catch {
+      return undefined;
+    }
   }
 
   start(retryCount = 0): void {
@@ -363,7 +454,7 @@ export class RSVPController extends EventTarget {
         text: currentWord?.text || '',
         range: currentWord?.range,
         docIndex: currentWord?.docIndex,
-        cfi: currentWord?.cfi,
+        cfi: this.getCfiForWord(currentWord),
       };
     }
 
@@ -651,7 +742,17 @@ export class RSVPController extends EventTarget {
     const { doc, index: docIndex } = primary as { doc: Document; index: number };
     if (!doc?.body) return [];
 
-    return this.extractWordsFromElement(doc.body, doc, docIndex);
+    if (
+      this.cachedWords &&
+      this.cachedWords.docIndex === docIndex &&
+      this.cachedWords.doc === doc
+    ) {
+      return this.cachedWords.words;
+    }
+
+    const words = this.extractWordsFromElement(doc.body, doc, docIndex);
+    this.cachedWords = { docIndex, doc, words };
+    return words;
   }
 
   private extractWordsFromElement(
@@ -665,7 +766,7 @@ export class RSVPController extends EventTarget {
     const walk = (node: Node): void => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent || '';
-        const nodeWords = splitTextIntoWords(text);
+        const nodeWords = splitTextIntoWords(text, this.primaryLanguage);
 
         let offset = 0;
         for (const word of nodeWords) {
@@ -677,22 +778,15 @@ export class RSVPController extends EventTarget {
             range.setStart(node, wordStart);
             range.setEnd(node, wordStart + word.length);
 
-            // Generate CFI for this word for position tracking
-            let cfi: string | undefined;
-            try {
-              cfi = this.view.getCFI(docIndex, range);
-            } catch {
-              // CFI generation failed, will fall back to word index
-              cfi = undefined;
-            }
-
+            // CFI is computed lazily — see savePositionToStorage(),
+            // stop(), and findWordIndexByCfi(). At 45k+ words/section,
+            // eager generation dominates extract time.
             words.push({
               text: word,
               orpIndex: this.calculateORP(word),
               pauseMultiplier: this.getPauseMultiplier(word),
               range,
               docIndex,
-              cfi,
             });
           } catch {
             words.push({
@@ -738,7 +832,7 @@ export class RSVPController extends EventTarget {
       return Math.floor(word.length / 2);
     }
 
-    const cleanWord = word.replace(/[^\w]/g, '');
+    const cleanWord = word.replace(/[^\p{L}\p{N}_]/gu, '');
     const len = cleanWord.length;
 
     if (len <= 1) return 0;
@@ -771,7 +865,7 @@ export class RSVPController extends EventTarget {
     const baseMs = 60000 / wpm;
     let duration = baseMs * word.pauseMultiplier;
 
-    if (/[.!?,;:]$/.test(word.text)) {
+    if (/[.!?,;:–—]$/.test(word.text)) {
       duration += this.state.punctuationPauseMs;
     }
 
@@ -790,5 +884,6 @@ export class RSVPController extends EventTarget {
     this.stop();
     this.clearPositionFromStorage();
     this.currentCfi = null;
+    this.cachedWords = null;
   }
 }

@@ -27,7 +27,7 @@ import { setMigrateDataDirDialogVisible } from '@/app/library/components/Migrate
 import { requestStoragePermission } from '@/utils/permission';
 import { saveSysSettings } from '@/helpers/settings';
 import { selectDirectory } from '@/utils/bridge';
-import { formatLocaleDateTime } from '@/utils/book';
+import dayjs from 'dayjs';
 import UserAvatar from '@/components/UserAvatar';
 import MenuItem from '@/components/MenuItem';
 import Quota from '@/components/Quota';
@@ -55,7 +55,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [isAlwaysShowStatusBar, setIsAlwaysShowStatusBar] = useState(settings.alwaysShowStatusBar);
-  const [isScreenWakeLock, setIsScreenWakeLock] = useState(settings.screenWakeLock);
   const [isOpenLastBooks, setIsOpenLastBooks] = useState(settings.openLastBooks);
   const [isAutoImportBooksOnOpen, setIsAutoImportBooksOnOpen] = useState(
     settings.autoImportBooksOnOpen,
@@ -102,11 +101,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     setThemeMode(nextMode);
   };
 
-  const handleReloadPage = () => {
-    window.location.reload();
-    setIsDropdownOpen?.(false);
-  };
-
   const handleFullScreen = () => {
     tauriHandleToggleFullScreen();
     setIsDropdownOpen?.(false);
@@ -151,12 +145,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     const newValue = !settings.autoCheckUpdates;
     saveSysSettings(envConfig, 'autoCheckUpdates', newValue);
     setIsAutoCheckUpdates(newValue);
-  };
-
-  const toggleScreenWakeLock = () => {
-    const newValue = !settings.screenWakeLock;
-    saveSysSettings(envConfig, 'screenWakeLock', newValue);
-    setIsScreenWakeLock(newValue);
   };
 
   const toggleOpenLastBooks = () => {
@@ -326,8 +314,8 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
             <MenuItem
               label={
                 settings.lastSyncedAtBooks
-                  ? _('Synced at {{time}}', {
-                      time: formatLocaleDateTime(settings.lastSyncedAtBooks),
+                  ? _('Synced {{time}}', {
+                      time: dayjs(settings.lastSyncedAtBooks).fromNow(),
                     })
                   : _('Never synced')
               }
@@ -398,11 +386,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
           onClick={toggleAlwaysShowStatusBar}
         />
       )}
-      <MenuItem
-        label={_('Keep Screen Awake')}
-        toggled={isScreenWakeLock}
-        onClick={toggleScreenWakeLock}
-      />
       {appService?.isAndroidApp && (
         <MenuItem
           label={_(_('Background Read Aloud'))}
@@ -410,7 +393,6 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
           onClick={toggleAlwaysInForeground}
         />
       )}
-      <MenuItem label={_('Reload Page')} onClick={handleReloadPage} />
       <MenuItem
         label={themeModeLabel}
         Icon={themeMode === 'dark' ? PiMoon : themeMode === 'light' ? PiSun : TbSunMoon}

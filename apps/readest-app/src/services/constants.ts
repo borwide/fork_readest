@@ -35,6 +35,7 @@ export const LOCAL_BOOKS_SUBDIR = `${DATA_SUBDIR}/Books`;
 export const CLOUD_BOOKS_SUBDIR = `${DATA_SUBDIR}/Books`;
 export const LOCAL_FONTS_SUBDIR = `${DATA_SUBDIR}/Fonts`;
 export const LOCAL_IMAGES_SUBDIR = `${DATA_SUBDIR}/Images`;
+export const LOCAL_DICTIONARIES_SUBDIR = `${DATA_SUBDIR}/Dictionaries`;
 
 export const SETTINGS_FILENAME = 'settings.json';
 
@@ -108,6 +109,15 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   metadataSeriesCollapsed: false,
   metadataOthersCollapsed: false,
   metadataDescriptionCollapsed: false,
+
+  customDictionaries: [],
+  dictionarySettings: {
+    providerOrder: ['builtin:wiktionary', 'builtin:wikipedia'],
+    providerEnabled: {
+      'builtin:wiktionary': true,
+      'builtin:wikipedia': true,
+    },
+  },
 
   kosync: DEFAULT_KOSYNC_SETTINGS,
   readwise: DEFAULT_READWISE_SETTINGS,
@@ -718,6 +728,14 @@ export const DOWNLOAD_READEST_URL = 'https://readest.com?utm_source=readest_web'
 export const READEST_WEB_BASE_URL = 'https://web.readest.com';
 export const READEST_NODE_BASE_URL = 'https://node.readest.com';
 
+export const SHARE_BASE_URL = `${READEST_WEB_BASE_URL}/s`;
+export const SHARE_EXPIRATION_DAYS = [1, 3, 7] as const;
+export const SHARE_DEFAULT_EXPIRATION_DAYS = 3;
+export const SHARE_MAX_PER_USER = 50;
+export const SHARE_TOKEN_LENGTH = 22;
+export const SHARE_PRESIGN_TTL_SECONDS = 300;
+export const SHARE_CFI_MAX_LENGTH = 512;
+
 const LATEST_DOWNLOAD_BASE_URL = 'https://download.readest.com/releases';
 
 export const READEST_UPDATER_FILE = `${LATEST_DOWNLOAD_BASE_URL}/latest.json`;
@@ -824,6 +842,7 @@ export const TRANSLATED_LANGS = {
   ko: '한국어',
   es: 'Español',
   pt: 'Português',
+  'pt-BR': 'Português (Brasil)',
   ru: 'Русский',
   he: 'עברית',
   ar: 'العربية',
@@ -846,6 +865,7 @@ export const TRANSLATED_LANGS = {
   'zh-TW': '正體中文',
   ro: 'Română',
   hu: 'Magyar',
+  uz: 'Oʻzbek',
 };
 
 export const TRANSLATOR_LANGS: Record<string, string> = {
