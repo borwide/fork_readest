@@ -15,6 +15,8 @@ import {
   generateDarkPalette,
 } from '@/styles/themes';
 import { createFontCSS, CustomFont } from '@/styles/fonts';
+import { readStoredAmbientIsDarkMode } from './ambientLight';
+import { INLINE_FORMATTING_SELECTOR } from './inlineTags';
 import { getOSPlatform } from './misc';
 import { SCROLL_WRAPPER_CLASS, SCROLL_WRAPPER_FIT_CLASS } from './scrollable';
 
@@ -90,6 +92,16 @@ const getFontStyles = (
 ) => {
   const families = buildFontFamilyLists(serif, sansSerif, monospace, defaultCJKFont);
   const defaultFontFamily = defaultFont.toLowerCase() === 'serif' ? '--serif' : '--sans-serif';
+  // Normalize publisher body-copy sizes (the Readium CSS element set) so the
+  // configured font size applies even when the book sets explicit sizes on its
+  // paragraphs (#5420). Opt-in via "Override Book Font" since it also flattens
+  // intentional sizing on these elements. Fixed layouts are unaffected: their
+  // renderer has no setStyles, so this is only injected into reflowable docs.
+  const bodyFontSizeOverride = `
+    p, li, div, pre, dd {
+      font-size: max(1rem, var(--min-font-size, 8px)) !important;
+    }
+  `;
   const fontStyles = `
     html {
       --serif: ${families.serif};
@@ -145,6 +157,7 @@ const getFontStyles = (
     body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
       ${overrideFont ? 'font-family: revert !important;' : ''}
     }
+    ${overrideFont ? bodyFontSizeOverride : ''}
   `;
   return fontStyles;
 };
@@ -264,10 +277,13 @@ const getColorStyles = (
     body.pbg {
       ${isDarkMode ? `background-color: ${bg} !important;` : ''}
     }
+    /* When inverting in dark mode, invert(100%) must stay the effective filter
+       (a later filter declaration would discard it), and multiply must not
+       apply: multiply with a dark page background erases the image (#5250). */
     img {
       ${isDarkMode && invertImgColorInDark ? 'filter: invert(100%);' : ''}
-      ${isDarkMode && overrideColor ? 'filter: grayscale(100%) contrast(1.2) brightness(1.2);' : ''}
-      ${overrideColor ? 'mix-blend-mode: multiply;' : ''}
+      ${isDarkMode && !invertImgColorInDark && overrideColor ? 'filter: grayscale(100%) contrast(1.2) brightness(1.2);' : ''}
+      ${overrideColor && !(isDarkMode && invertImgColorInDark) ? 'mix-blend-mode: multiply;' : ''}
     }
     svg, img {
       ${overrideColor ? `background-color: transparent !important;` : ''};
@@ -555,7 +571,13 @@ const getParagraphLayoutStyles = (
       text-align: unset;
       hyphens: unset;
   }
-  p, blockquote, dd, div:not(:has(*:not(b, a, em, i, strong, u, span))) {
+  /* The div clause treats a div as paragraph-like only when every descendant is
+     inline formatting (INLINE_FORMATTING_TAGS). Anything injected into a book
+     paragraph at runtime — the translation target, its preserved markup, the
+     a11y skip link — must use a tag from that list, or the enclosing div drops
+     this whole rule and reverts to the book's default line spacing, indent and
+     hyphenation. */
+  p, blockquote, dd, div:not(:has(*:not(${INLINE_FORMATTING_SELECTOR}))) {
     line-height: ${lineSpacing} ${overrideLayout ? '!important' : ''};
     word-spacing: ${wordSpacing}px ${overrideLayout ? '!important' : ''};
     letter-spacing: ${letterSpacing}px ${overrideLayout ? '!important' : ''};
@@ -725,6 +747,11 @@ const getTranslationStyles = (showSource: boolean) => `
   }
   .translation-target {
   }
+  /* The original is wrapped rather than erased so its CFIs stay resolvable;
+     cfi-skip keeps the wrapper invisible to CFI indexing. */
+  .translation-source-hidden {
+    display: none !important;
+  }
   .translation-target.hidden {
     display: none !important;
   }
@@ -806,14 +833,22 @@ export const getThemeCode = () => {
   let themeMode = 'auto';
   let themeColor = 'default';
   let systemIsDarkMode = false;
+  let ambientIsDarkMode = false;
   let customThemes: CustomTheme[] = [];
   if (typeof window !== 'undefined') {
     themeColor = localStorage.getItem('themeColor') || 'default';
     themeMode = localStorage.getItem('themeMode') || 'auto';
     systemIsDarkMode = localStorage.getItem('systemIsDarkMode') === 'true';
+    ambientIsDarkMode = readStoredAmbientIsDarkMode(
+      localStorage.getItem('ambientIsDarkMode'),
+      systemIsDarkMode,
+    );
     customThemes = JSON.parse(localStorage.getItem('customThemes') || '[]');
   }
-  const isDarkMode = themeMode === 'dark' || (themeMode === 'auto' && systemIsDarkMode);
+  const isDarkMode =
+    themeMode === 'dark' ||
+    (themeMode === 'auto' && systemIsDarkMode) ||
+    (themeMode === 'ambient' && ambientIsDarkMode);
   let currentTheme = themes.find((theme) => theme.name === themeColor);
   if (!currentTheme) {
     const customTheme = customThemes.find((theme) => theme.name === themeColor);
