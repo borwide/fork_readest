@@ -28,6 +28,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.input.InputManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -223,6 +224,9 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     // packets without it. Released in onDestroy.
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
 
+    // The in-app browser presented by `open_web_browser` (#5775); null when closed.
+    private var activeWebBrowser: WebBrowserController? = null
+
     private var sensorManager: SensorManager? = null
     private var ambientLightListening = false
     private var lastEmittedLux: Float = Float.NaN
@@ -245,8 +249,38 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
 
+    // Chromium's Web Gamepad API starts a native polling thread as soon as a
+    // page observes it (#5693). InputManager is event-driven, so use it only to
+    // tell JS when the browser API should be enabled or disabled.
+    private var inputManager: InputManager? = null
+    private var gamepadConnected = false
+    private val gamepadInputListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = emitGamepadConnection()
+        override fun onInputDeviceRemoved(deviceId: Int) = emitGamepadConnection()
+        override fun onInputDeviceChanged(deviceId: Int) = emitGamepadConnection()
+    }
+
+    private fun hasConnectedGamepad(): Boolean {
+        val inputManager = inputManager ?: return false
+        return hasGamepadDevice(inputManager.inputDeviceIds) { deviceId ->
+            inputManager.getInputDevice(deviceId)?.sources
+        }
+    }
+
+    private fun emitGamepadConnection(force: Boolean = false) {
+        val connected = hasConnectedGamepad()
+        if (!force && connected == gamepadConnected) return
+        gamepadConnected = connected
+        if (!hasListener(GAMEPAD_CONNECTION_EVENT)) return
+
+        val payload = JSObject().apply { put("connected", connected) }
+        triggerEvent(GAMEPAD_CONNECTION_EVENT, payload)
+    }
+
     override fun onDestroy() {
         stopAmbientLightUpdatesInternal()
+        inputManager?.unregisterInputDeviceListener(gamepadInputListener)
+        inputManager = null
         try {
             multicastLock?.takeIf { it.isHeld }?.release()
         } catch (_: Exception) {
@@ -259,6 +293,7 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     }
 
     companion object {
+        private const val GAMEPAD_CONNECTION_EVENT = "gamepad-connection"
         private const val REQUEST_MANAGE_STORAGE = 1001
         private const val FOLDER_PICKER_REQUEST_CODE = 1002
         private const val FILE_PICKER_REQUEST_CODE = 1003
@@ -288,6 +323,9 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         instance = this
         webViewRef = webView
         super.load(webView)
+        inputManager = activity.getSystemService(Context.INPUT_SERVICE) as? InputManager
+        gamepadConnected = hasConnectedGamepad()
+        inputManager?.registerInputDeviceListener(gamepadInputListener, null)
         activity.application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         handleIntent(activity.intent)
         pendingFilePickerData?.let { data ->
@@ -471,6 +509,12 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             for ((event, payload) in toReplay) {
                 triggerEvent(event, payload)
             }
+        }
+        if (hasListener(GAMEPAD_CONNECTION_EVENT)) {
+            // registerListener can race both initial app hydration and device
+            // changes. Re-query instead of trusting the cached value so an
+            // already-connected controller is always reported immediately.
+            emitGamepadConnection(force = true)
         }
     }
 
@@ -1360,7 +1404,15 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             withContext(Dispatchers.IO) {
                 val books = org.json.JSONArray()
                 for (book in args.books) {
-                    ReadingWidgetStore.writeThumbnail(activity, book.hash, book.coverPath, book.percent)
+                    // A thumbnail failure must never escape pluginScope: an
+                    // uncaught exception here kills the process, and the
+                    // snapshot is republished on every library load, so one
+                    // bad cover would crash the app on every launch.
+                    try {
+                        ReadingWidgetStore.writeThumbnail(activity, book.hash, book.coverPath, book.percent)
+                    } catch (e: Exception) {
+                        Log.w("NativeBridgePlugin", "widget thumbnail failed for ${book.hash}", e)
+                    }
                     books.put(
                         org.json.JSONObject()
                             .put("hash", book.hash)
@@ -1756,6 +1808,57 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             }
         }
         controller.show()
+    }
+
+    /**
+     * Present the in-app browser (#5775). Resolves `{ openBookHash? }` when
+     * the user closes it; downloads are emitted as `web-browser-download`
+     * plugin events while it is open (queued if JS has not registered yet).
+     */
+    @Command
+    fun open_web_browser(invoke: Invoke) {
+        val args = try {
+            invoke.parseArgs(WebBrowserArgs::class.java)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "Invalid open_web_browser args")
+            return
+        }
+        val controller = WebBrowserController(
+            activity,
+            args,
+            onDownload = { event ->
+                val payload = JSObject()
+                payload.put("url", event.url)
+                payload.put("path", event.path)
+                payload.put("filename", event.filename)
+                payload.put("success", event.success)
+                event.error?.let { payload.put("error", it) }
+                emitOrQueue("web-browser-download", payload)
+            },
+            completion = { hash ->
+                activeWebBrowser = null
+                val ret = JSObject()
+                if (hash != null) ret.put("openBookHash", hash)
+                invoke.resolve(ret)
+            },
+        )
+        activeWebBrowser = controller
+        controller.show()
+    }
+
+    /** Push an import status into the open browser's banner. */
+    @Command
+    fun set_web_browser_status(invoke: Invoke) {
+        val args = try {
+            invoke.parseArgs(WebBrowserStatusArgs::class.java)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "Invalid set_web_browser_status args")
+            return
+        }
+        activity.runOnUiThread {
+            activeWebBrowser?.setStatus(args.state ?: "", args.filename ?: "", args.bookHash)
+        }
+        invoke.resolve()
     }
 
     /**

@@ -109,7 +109,7 @@ const makeProps = (overrides: Record<string, unknown> = {}) => ({
   ttsLang: 'en',
   isPlaying: true,
   hasTimeline: true,
-  hasGapControl: false,
+  audioTransport: false,
   timeoutOption: 0,
   timeoutTimestamp: 0,
   chapterRemainingSec: null as number | null,
@@ -118,8 +118,6 @@ const makeProps = (overrides: Record<string, unknown> = {}) => ({
   onBackward: vi.fn(),
   onForward: vi.fn(),
   onSetRate: vi.fn(),
-  onSetSentenceGap: vi.fn(),
-  onSetParagraphGap: vi.fn(),
   onGetVoices: vi.fn().mockResolvedValue(voiceGroups),
   onSetVoice: vi.fn(),
   onGetVoiceId: vi.fn().mockReturnValue('ava'),
@@ -134,10 +132,14 @@ const makeProps = (overrides: Record<string, unknown> = {}) => ({
     chapters: [],
     statuses: new Map(),
     cacheBytes: 0,
-    download: { activeChapterKey: null, done: 0, total: 0 },
-    downloadChapter: vi.fn().mockResolvedValue(undefined),
-    downloadAll: vi.fn().mockResolvedValue(undefined),
-    cancel: vi.fn(),
+    clearing: false,
+    items: [],
+    itemFor: () => undefined,
+    downloadChapter: vi.fn(),
+    downloadAll: vi.fn(),
+    cancelChapter: vi.fn(),
+    cancelAll: vi.fn(),
+    clearDownloads: vi.fn().mockResolvedValue(undefined),
     statusOf: vi.fn().mockReturnValue('none'),
     refresh: vi.fn().mockResolvedValue(undefined),
   },
@@ -209,6 +211,27 @@ describe('TTSPlayerSheet', () => {
     expect(props.onForward).toHaveBeenCalledWith(false);
   });
 
+  test('a paired audiobook gets seek and chapter transport with the same step semantics', () => {
+    const props = makeProps({ audioTransport: true });
+    render(<TTSPlayerSheet {...props} />);
+    for (const label of [
+      'Previous Paragraph',
+      'Previous Sentence',
+      'Next Sentence',
+      'Next Paragraph',
+    ]) {
+      expect(screen.queryByLabelText(label)).toBeNull();
+    }
+    fireEvent.click(screen.getByLabelText('Previous Chapter'));
+    expect(props.onBackward).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByLabelText('Back 15 Seconds'));
+    expect(props.onBackward).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByLabelText('Forward 30 Seconds'));
+    expect(props.onForward).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByLabelText('Next Chapter'));
+    expect(props.onForward).toHaveBeenCalledWith(false);
+  });
+
   test('main view offers a close button since desktop has no drag handle', () => {
     const props = makeProps();
     render(<TTSPlayerSheet {...props} />);
@@ -253,23 +276,6 @@ describe('TTSPlayerSheet', () => {
     expect(saveSettings).toHaveBeenCalled();
   });
 
-  test('rate-derived pauses keep sub-second precision instead of collapsing to zero', () => {
-    // The gaps are sub-second by design (0.15s / 0.3s), so rounding them to a
-    // whole number erases both at every speed - no pause between sentences or
-    // paragraphs, and no control left to restore one. See #5414.
-    const props = makeProps();
-    render(<TTSPlayerSheet {...props} />);
-    fireEvent.click(screen.getByLabelText('Speed'));
-    const slider = screen.getByRole('slider', { name: 'Speed' });
-    fireEvent.change(slider, { target: { value: '1.5' } });
-    fireEvent.pointerUp(slider);
-    // Faster speech shortens the pauses, it must not erase them.
-    expect(props.onSetSentenceGap).toHaveBeenCalledWith(0.12);
-    expect(props.onSetParagraphGap).toHaveBeenCalledWith(0.24);
-    expect(viewSettings['ttsSentenceGap']).toBe(0.12);
-    expect(viewSettings['ttsParagraphGap']).toBe(0.24);
-  });
-
   test('voice button drills into the voice list and selects a voice', async () => {
     const props = makeProps();
     render(<TTSPlayerSheet {...props} />);
@@ -293,10 +299,14 @@ describe('TTSPlayerSheet', () => {
     chapters: [{ key: 'c1', label: 'One', depth: 0, startSection: 0, endSection: 1 }],
     statuses: new Map(),
     cacheBytes: 0,
-    download: { activeChapterKey: null, done: 0, total: 0 },
-    downloadChapter: vi.fn().mockResolvedValue(undefined),
-    downloadAll: vi.fn().mockResolvedValue(undefined),
-    cancel: vi.fn(),
+    clearing: false,
+    items: [],
+    itemFor: () => undefined,
+    downloadChapter: vi.fn(),
+    downloadAll: vi.fn(),
+    cancelChapter: vi.fn(),
+    cancelAll: vi.fn(),
+    clearDownloads: vi.fn().mockResolvedValue(undefined),
     statusOf: vi.fn().mockReturnValue('complete'),
     refresh: vi.fn().mockResolvedValue(undefined),
     ...over,
