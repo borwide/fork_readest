@@ -278,6 +278,20 @@
     scrollbar-gutter: unset !important;
   }
 
+  /* daisyUI 5 moved the enter animation onto `.modal-box` itself
+     (`opacity: 0; scale: .95`) and only un-hides it from
+     `.modal:is(.modal-open, [open], :popover-open, :target) > .modal-box`. In
+     daisyUI 4 that state lived on `.modal`, so the app also uses `.modal-box`
+     as a standalone box chassis (background, radius, shadow, eink border) under
+     its own hand-rolled overlays. Those boxes have no `.modal` ancestor to
+     un-hide them, so after the v5 migration they laid out but never painted.
+     Restore the v4 resting state for that case only; a box inside a `.modal`
+     still animates, including the close transition Dialog.tsx depends on. */
+  :where(.modal-box):not(:where(.modal *)) {
+    opacity: 1;
+    scale: 1;
+  }
+
   html[data-page='default'] {
     background: var(--color-base-100);
   }
@@ -416,6 +430,20 @@
   :where(.dropdown-content) {
     width: max-content;
     max-width: calc(100vw - 32px);
+  }
+
+  /* Keep the book menu's width stable while nested sync actions expand. A
+     linked Hardcover title is intentionally truncated inside its row; letting
+     that title set the menu's intrinsic width also leaves stale hover paint in
+     macOS WebKit when the pointer moves across the resized rows (#5973). */
+  :where(.book-menu) {
+    width: 18rem;
+    max-width: calc(100vw - 2rem);
+  }
+
+  :where(.book-menu details > ul) {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .dropdown-content::before,
@@ -825,6 +853,30 @@
     background-color: var(--color-base-100);
     color: var(--color-base-content);
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+    /* daisyUI already end-aligns the picker to the select
+       (`position-area: self-start span-self-start`) and then pushes it back off
+       that edge by 16px: `margin-inline: 8px` plus `translate: -8px`, mirrored
+       as `translate: .5rem` under [dir=rtl]. Drop both so the popup lines up
+       with the value it belongs to. Only the end-side margin goes -- the
+       start-side one still keeps a wide picker off the opposite edge -- and
+       both properties are direction-agnostic, so RTL stays correct. */
+    margin-inline-end: 0;
+    translate: none;
+  }
+
+  /* SettingsSelect renders its chevron as a separate icon *outside* the
+     <select>, so the picker's implicit anchor stops ~20px short of the control's
+     visible trailing edge. It anchors to its wrapper instead (see
+     SettingsSelect); the wrapper scopes the name so each row resolves its own. */
+  :where(.settings-content)::picker(select) {
+    position-anchor: --settings-select;
+  }
+
+  /* Because that picker is painted in-page, CSS on <option> is live, and
+     daisyUI 5 ships `white-space: normal` on it, so a long entry
+     ("Português (Brasil)") wraps onto several lines in a narrow select. */
+  :where(.select) option {
+    white-space: nowrap;
   }
 
   /* v4 drew the select's focus ring at 20% base-content; v5 draws it solid and
@@ -949,6 +1001,24 @@
     -ms-overflow-style: none;
   }
   .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Virtuoso owns the scroller inside every OverlayScrollbars root we set up
+     (bookshelf, TOC, book notes) and gives it `overflow-y: auto` inline, so the
+     platform scrollbar paints for as long as OverlayScrollbars' deferred init
+     takes — then vanishes when OS marks the same element
+     `data-overlayscrollbars-viewport="scrollbarHidden ..."`, widening the
+     content by the scrollbar's width and shifting the whole grid. OS ships
+     hiding rules for `[data-overlayscrollbars-initialize]`, but that attribute
+     sits on the root we hand it, never on the child that actually scrolls.
+     Hide it there too, until OS takes the root over. */
+  [data-overlayscrollbars-initialize]:not([data-overlayscrollbars]) [data-virtuoso-scroller] {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  [data-overlayscrollbars-initialize]:not([data-overlayscrollbars])
+    [data-virtuoso-scroller]::-webkit-scrollbar {
     display: none;
   }
 
@@ -1423,5 +1493,57 @@
   [data-eink='true'] .tts-scrubber {
     height: 6px;
     border: 1px solid currentColor;
+  }
+
+  /* Nearby BookDrop radar view: scanning ripples behind the self chip and a
+     pop-in for newly discovered peer tiles. Decorative motion only — the
+     transfer progress ring is drawn with SVG stroke offsets and keeps
+     updating when these animations are disabled. */
+  @keyframes localsend-ripple {
+    0% {
+      transform: scale(0.25);
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 0;
+    }
+  }
+  .animate-localsend-ripple {
+    animation: localsend-ripple 2.4s ease-out infinite;
+  }
+  @keyframes localsend-pop-in {
+    0% {
+      transform: scale(0.6);
+      opacity: 0;
+    }
+    60% {
+      transform: scale(1.06);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  .animate-localsend-pop-in {
+    animation: localsend-pop-in 0.35s ease-out both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-localsend-ripple {
+      animation: none;
+      display: none;
+    }
+    .animate-localsend-pop-in {
+      animation: none;
+    }
+  }
+  /* E-ink refreshes can't animate; the bordered static tiles carry the UI. */
+  [data-eink='true'] .animate-localsend-ripple {
+    animation: none;
+    display: none;
+  }
+  [data-eink='true'] .animate-localsend-pop-in {
+    animation: none;
   }
 }

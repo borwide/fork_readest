@@ -24,7 +24,7 @@ import {
   pickFresherCover,
   pickFresherMetadata,
 } from '@/app/library/utils/libraryUtils';
-import { getPrimaryLanguage } from '@/utils/book';
+import { getPrimaryLanguage, pickFresherGroup } from '@/utils/book';
 import { isAudiobook, parseAbsFilePath } from '@/utils/audiobook';
 
 export const useBooksSync = () => {
@@ -281,6 +281,25 @@ export const useBooksSync = () => {
             mergedBook.primaryLanguage = getPrimaryLanguage(meta.metadata.language);
           }
         }
+        // Group membership resolves on its own groupUpdatedAt clock (issue
+        // #5911). `transformBookFromDB` always materialises groupId/groupName,
+        // so the row spread above hands an absent cloud group straight over a
+        // present local one — and it does so on `>=`, meaning a mere TIE wiped
+        // the group. `updatedAt` is bumped by an UPLOAD as well as by an edit,
+        // so a stale cloud row could outrank every real grouping.
+        const group = pickFresherGroup(
+          oldBook,
+          matchingBook,
+          matchingBook.updatedAt >= oldBook.updatedAt,
+        );
+        mergedBook.groupId = group.groupId;
+        mergedBook.groupName = group.groupName;
+        mergedBook.groupUpdatedAt = group.groupUpdatedAt;
+        // Same story for the metadata blob, which carries the description: a
+        // cloud row whose `metadata` column is null arrives as `metadata: null`
+        // and the spread clears the local copy. An absent blob always means
+        // "this row never had one", never "the user cleared it" (#5912).
+        mergedBook.metadata = mergedBook.metadata ?? oldBook.metadata ?? matchingBook.metadata;
         return mergedBook;
       }
       return oldBook;
@@ -289,7 +308,12 @@ export const useBooksSync = () => {
     const oldBooksBatchSize = 100;
     for (let i = 0; i < oldBooksNeedsDownload.length; i += oldBooksBatchSize) {
       const batch = oldBooksNeedsDownload.slice(i, i + oldBooksBatchSize);
-      await appService?.downloadBookCovers(batch);
+      await appService?.downloadBookCovers(batch).catch((error) => {
+        console.warn('Cover refresh failed; continuing library sync:', error);
+        // The merge adopts the remote cover hash below. Keep failed covers
+        // eligible for retry even after their metadata clocks match.
+        for (const book of batch) book.coverDownloadedAt = null;
+      });
     }
 
     const updatedLibrary = await Promise.all(liveLibrary.map(processOldBook));
@@ -334,7 +358,9 @@ export const useBooksSync = () => {
       const batchSize = 10;
       for (let i = 0; i < newBooks.length; i += batchSize) {
         const batch = newBooks.slice(i, i + batchSize);
-        await appService?.downloadBookCovers(batch);
+        await appService?.downloadBookCovers(batch).catch((error) => {
+          console.warn('Cover download failed; continuing library sync:', error);
+        });
         await Promise.all(batch.map(processNewBook));
         const progress = Math.min((i + batchSize) / newBooks.length, 1);
         setSyncProgress(progress);
