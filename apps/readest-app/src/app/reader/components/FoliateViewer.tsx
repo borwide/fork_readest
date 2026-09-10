@@ -308,6 +308,7 @@ const FoliateViewer: React.FC<{
               userLocale: getLocale(),
               content: data,
               sectionHref: detail.name,
+              sectionCfi: bookData.bookDoc?.sections?.find((s) => s.id === detail.name)?.cfi,
               transformers: [
                 'epubSwitch',
                 'style',
@@ -799,14 +800,12 @@ const FoliateViewer: React.FC<{
       if (appService?.isIOSApp) {
         view.renderer.setAttribute('gpu-composite', '');
       }
-      if (appService?.isAndroidApp) {
-        if (eink) {
-          view.renderer.setAttribute('eink', '');
-        } else {
-          view.renderer.removeAttribute('eink');
-        }
-        applyEinkMode(eink);
+      if (eink) {
+        view.renderer.setAttribute('eink', '');
+      } else {
+        view.renderer.removeAttribute('eink');
       }
+      applyEinkMode(eink);
       if (bookDoc?.rendition?.layout === 'pre-paginated') {
         view.renderer.setAttribute('zoom', viewSettings.zoomMode);
         view.renderer.setAttribute('spread', viewSettings.spreadMode);
